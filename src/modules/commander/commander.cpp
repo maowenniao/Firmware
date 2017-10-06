@@ -2942,7 +2942,7 @@ int commander_thread_main(int argc, char *argv[])
 		}
 
 		/* Reset main state to loiter after takeoff is completed.
-		 * Sometimes, the mission result topic is outdated and the mission is still signalled
+		 * Sometimes, the mission result topic is outdated and the mission is still signaled
 		 * as finished even though we only just started with the takeoff. Therefore, we also
 		 * check the timestamp of the mission_result topic. */
 		if (internal_state.main_state == commander_state_s::MAIN_STATE_AUTO_TAKEOFF
