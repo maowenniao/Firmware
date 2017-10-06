@@ -1336,6 +1336,7 @@ int commander_thread_main(int argc, char *argv[])
 	param_t _param_arm_switch_is_button = param_find("COM_ARM_SWISBTN");
 	param_t _param_rc_override = param_find("COM_RC_OVERRIDE");
 	param_t _param_arm_mission_required = param_find("COM_ARM_MIS_REQ");
+	param_t _param_takeoff_finished_action = param_find("COM_TAKEOFF_ACT");
 
 	param_t _param_fmode_1 = param_find("COM_FLTMODE1");
 	param_t _param_fmode_2 = param_find("COM_FLTMODE2");
@@ -1747,6 +1748,7 @@ int commander_thread_main(int argc, char *argv[])
 	/* RC override auto modes */
 	int32_t rc_override = 0;
 
+	int32_t takeoff_complete_act = 0;
 
 	/* Thresholds for engine failure detection */
 	int32_t ef_throttle_thres = 1.0f;
@@ -1897,6 +1899,8 @@ int commander_thread_main(int argc, char *argv[])
 
 			/* failsafe response to loss of navigation accuracy */
 			param_get(_param_posctl_nav_loss_act, &posctl_nav_loss_act);
+
+			param_get(_param_takeoff_finished_action, &takeoff_complete_act);
 
 			param_init_forced = false;
 		}
@@ -2914,17 +2918,16 @@ int commander_thread_main(int argc, char *argv[])
 			 * only for fixed wing for now
 			 */
 			if (!status_flags.circuit_breaker_engaged_enginefailure_check &&
-			    status.is_rotary_wing == false &&
-			    armed.armed &&
-			    ((actuator_controls.control[3] > ef_throttle_thres &&
-			      battery.current_a / actuator_controls.control[3] <
-			      ef_current2throttle_thres) ||
-			     (status.engine_failure))) {
+			    !status.is_rotary_wing && armed.armed &&
+			    ((actuator_controls.control[actuator_controls_s::INDEX_THROTTLE] > ef_throttle_thres &&
+			      (battery.current_a / actuator_controls.control[actuator_controls_s::INDEX_THROTTLE] < ef_current2throttle_thres)) ||
+			     status.engine_failure)) {
+
 				/* potential failure, measure time */
 				if (timestamp_engine_healthy > 0 &&
-				    hrt_elapsed_time(&timestamp_engine_healthy) >
-				    ef_time_thres * 1e6 &&
-				    !status.engine_failure) {
+				    (hrt_elapsed_time(&timestamp_engine_healthy) > ef_time_thres * 1e6) &&
+					!status.engine_failure) {
+
 					status.engine_failure = true;
 					status_changed = true;
 					mavlink_log_critical(&mavlink_log_pub, "Engine Failure");
@@ -2946,9 +2949,14 @@ int commander_thread_main(int argc, char *argv[])
 		 * as finished even though we only just started with the takeoff. Therefore, we also
 		 * check the timestamp of the mission_result topic. */
 		if (internal_state.main_state == commander_state_s::MAIN_STATE_AUTO_TAKEOFF
-					&& (_mission_result.timestamp > internal_state.timestamp)
-					&& _mission_result.finished) {
-			main_state_transition(&status, commander_state_s::MAIN_STATE_AUTO_LOITER, main_state_prev, &status_flags, &internal_state);
+			&& (_mission_result.timestamp > internal_state.timestamp)
+			&& _mission_result.finished) {
+
+			if ((takeoff_complete_act == 1) && _mission_result.valid) {
+				main_state_transition(&status, commander_state_s::MAIN_STATE_AUTO_MISSION, main_state_prev, &status_flags, &internal_state);
+			} else {
+				main_state_transition(&status, commander_state_s::MAIN_STATE_AUTO_LOITER, main_state_prev, &status_flags, &internal_state);
+			}
 		}
 
 		/* check if we are disarmed and there is a better mode to wait in */
@@ -2994,6 +3002,7 @@ int commander_thread_main(int argc, char *argv[])
 			    internal_state.main_state != commander_state_s::MAIN_STATE_POSCTL &&
 			    ((status.data_link_lost && status_flags.gps_failure) ||
 			     (status_flags.data_link_lost_cmd && status_flags.gps_failure_cmd))) {
+
 				armed.force_failsafe = true;
 				status_changed = true;
 				static bool flight_termination_printed = false;
@@ -3019,6 +3028,7 @@ int commander_thread_main(int argc, char *argv[])
 			     internal_state.main_state == commander_state_s::MAIN_STATE_POSCTL) &&
 			    ((status.rc_signal_lost && status_flags.gps_failure) ||
 			     (status_flags.rc_signal_lost_cmd && status_flags.gps_failure_cmd))) {
+
 				armed.force_failsafe = true;
 				status_changed = true;
 				static bool flight_termination_printed = false;
