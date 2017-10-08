@@ -43,7 +43,6 @@
 #include <uORB/topics/actuator_controls.h>
 #include <uORB/topics/actuator_outputs.h>
 #include <uORB/topics/actuator_armed.h>
-#include <uORB/topics/rc_channels.h>
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_mixer.h>
@@ -217,7 +216,13 @@ void task_main(int argc, char *argv[])
 		pwm_out = new NavioSysfsPWMOut(_device, _max_num_outputs);
 	}
 
-	if (pwm_out->init() != 0) {
+	/**
+	 * if the _protocol is "pca9685" and the driver is executed correctly，
+	 * the return value of "pwm_out->init()" will be higher than 0.
+	 */
+	bool check_pwm_device = (strcmp(_protocol, "pca9685") == 0) ? (0 > pwm_out->init()) : (pwm_out->init() != 0);
+
+	if (check_pwm_device) {
 		PX4_ERR("PWM output init failed");
 		delete pwm_out;
 		return;
@@ -285,7 +290,7 @@ void task_main(int argc, char *argv[])
 			_controls[0].control[2] = 0.f;
 			int channel = rc_channels.function[rc_channels_s::RC_CHANNELS_FUNCTION_THROTTLE];
 
-			if (ret == 0 && channel >= 0 && channel < (int)(sizeof(rc_channels.channels) / sizeof(rc_channels.channels[0]))) {
+			if (ret == 0 && channel >= 0 && channel < sizeof(rc_channels.channels) / sizeof(rc_channels.channels[0])) {
 				_controls[0].control[3] = rc_channels.channels[channel];
 
 			} else {
@@ -299,7 +304,9 @@ void task_main(int argc, char *argv[])
 		if (_mixer_group != nullptr) {
 			_outputs.timestamp = hrt_absolute_time();
 			/* do mixing */
-			_outputs.noutputs = _mixer_group->mix(_outputs.output, actuator_outputs_s::NUM_ACTUATOR_OUTPUTS);
+			_outputs.noutputs = _mixer_group->mix(_outputs.output,
+							      actuator_outputs_s::NUM_ACTUATOR_OUTPUTS,
+							      NULL);
 
 			/* disable unused ports by setting their output to NaN */
 			for (size_t i = _outputs.noutputs; i < _outputs.NUM_ACTUATOR_OUTPUTS; i++) {
@@ -345,7 +352,7 @@ void task_main(int argc, char *argv[])
 					pwm_value = _pwm_min;
 				}
 
-				for (uint32_t i = 0; i < _outputs.noutputs; ++i) {
+				for (int i = 0; i < _outputs.noutputs; ++i) {
 					pwm[i] = pwm_value;
 				}
 
